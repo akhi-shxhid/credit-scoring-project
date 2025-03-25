@@ -1,0 +1,256 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Card, 
+  CardContent, 
+  CardDescription, 
+  CardHeader, 
+  CardTitle 
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogTrigger 
+} from "@/components/ui/alert-dialog";
+import { 
+  Tooltip, 
+  TooltipContent, 
+  TooltipProvider, 
+  TooltipTrigger 
+} from "@/components/ui/tooltip";
+import { 
+  HelpCircle, 
+  RefreshCw, 
+  Check, 
+  X 
+} from 'lucide-react';
+
+const CreditScoringApp = () => {
+  // State for form inputs
+  const [formData, setFormData] = useState({
+    annual_income: '',
+    credit_history_length: '',
+    num_credit_cards: '',
+    total_debt: '',
+    payment_consistency: '',
+    age: ''
+  });
+
+  // State for prediction results
+  const [predictionResult, setPredictionResult] = useState(null);
+  const [modelInfo, setModelInfo] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Fetch model information on component mount
+  useEffect(() => {
+    fetchModelInfo();
+  }, []);
+
+  // Fetch model information
+  const fetchModelInfo = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/model-info');
+      const data = await response.json();
+      setModelInfo(data);
+    } catch (error) {
+      console.error('Error fetching model info:', error);
+    }
+  };
+
+  // Handle input changes
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Predict credit score
+  const predictCreditScore = async () => {
+    setIsLoading(true);
+    setPredictionResult(null);
+
+    try {
+      // Convert inputs to numbers
+      const processedData = Object.fromEntries(
+        Object.entries(formData).map(([key, value]) => [key, Number(value)])
+      );
+
+      const response = await fetch('http://localhost:5000/predict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(processedData)
+      });
+
+      const data = await response.json();
+
+      if (data.status === 'success') {
+        setPredictionResult(data.prediction);
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      console.error('Prediction error:', error);
+      alert(`Prediction failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Train model
+  const trainModel = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:5000/train', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        alert('Model trained successfully!');
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      console.error('Training error:', error);
+      alert(`Model training failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Render feature input with tooltip
+  const renderFeatureInput = (feature) => {
+    const description = modelInfo?.feature_descriptions?.[feature] || '';
+    
+    return (
+      <div className="mb-4">
+        <Label htmlFor={feature} className="flex items-center mb-2">
+          {feature.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger>
+                <HelpCircle className="ml-2 w-4 h-4 text-gray-500" />
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{description}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </Label>
+        <Input
+          id={feature}
+          name={feature}
+          type="number"
+          value={formData[feature]}
+          onChange={handleInputChange}
+          placeholder={`Enter ${feature.replace(/_/g, ' ')}`}
+          className="w-full"
+        />
+      </div>
+    );
+  };
+
+  // Render prediction result
+  const renderPredictionResult = () => {
+    if (!predictionResult) return null;
+
+    const isGoodCredit = predictionResult.credit_worthiness === 1;
+
+    return (
+      <Card className={`mt-4 ${isGoodCredit ? 'border-green-500' : 'border-red-500'}`}>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            {isGoodCredit ? (
+              <Check className="mr-2 text-green-500" />
+            ) : (
+              <X className="mr-2 text-red-500" />
+            )}
+            Credit Worthiness Result
+          </CardTitle>
+          <CardDescription>
+            {isGoodCredit 
+              ? 'Congratulations! You have good credit.' 
+              : 'Sorry, your credit assessment is not favorable.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p>Probability of Credit Worthiness: {(predictionResult.probability * 100).toFixed(2)}%</p>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Credit Scoring Predictor</CardTitle>
+          <CardDescription>
+            Predict your credit worthiness based on financial parameters
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {/* Dynamic feature inputs */}
+          {modelInfo?.features.map(feature => renderFeatureInput(feature))}
+
+          {/* Prediction and Train Buttons */}
+          <div className="flex space-x-4 mt-4">
+            <Button 
+              onClick={predictCreditScore} 
+              disabled={isLoading}
+              className="w-full"
+            >
+              {isLoading ? (
+                <RefreshCw className="mr-2 animate-spin" />
+              ) : (
+                'Predict Credit Score'
+              )}
+            </Button>
+            
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                >
+                  Train Model
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Train Credit Scoring Model</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to retrain the model? This will regenerate synthetic data and train a new model.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={trainModel}>
+                    Continue
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+
+          {/* Prediction Result */}
+          {renderPredictionResult()}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default CreditScoringApp;
