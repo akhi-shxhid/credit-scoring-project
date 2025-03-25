@@ -1,0 +1,178 @@
+import os
+import numpy as np
+import pandas as pd
+import joblib
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+class CreditScoringModel:
+    def __init__(self):
+        self.model = None
+        self.scaler = None
+        self.features = [
+            'annual_income', 
+            'credit_history_length', 
+            'num_credit_cards', 
+            'total_debt', 
+            'payment_consistency', 
+            'age'
+        ]
+    
+    def generate_synthetic_data(self, n_samples=1000):
+        """Generate synthetic credit scoring dataset."""
+        np.random.seed(42)
+        data = {
+            'annual_income': np.random.normal(65000, 25000, n_samples),
+            'credit_history_length': np.random.randint(1, 30, n_samples),
+            'num_credit_cards': np.random.randint(0, 10, n_samples),
+            'total_debt': np.random.normal(50000, 30000, n_samples),
+            'payment_consistency': np.random.uniform(0, 1, n_samples),
+            'age': np.random.randint(21, 65, n_samples)
+        }
+        
+        df = pd.DataFrame(data)
+        
+        # Define credit worthiness based on synthetic rules
+        df['credit_worthiness'] = (
+            (df['annual_income'] > 50000) & 
+            (df['credit_history_length'] > 3) & 
+            (df['total_debt'] < df['annual_income'] * 0.5) & 
+            (df['payment_consistency'] > 0.7)
+        ).astype(int)
+        
+        return df
+    
+    def train_model(self):
+        """Train the credit scoring model."""
+        # Generate synthetic data
+        credit_data = self.generate_synthetic_data()
+        
+        # Prepare features and target
+        X = credit_data[self.features]
+        y = credit_data['credit_worthiness']
+        
+        # Split the data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        
+        # Scale features
+        self.scaler = StandardScaler()
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        # Train Random Forest model
+        self.model = RandomForestClassifier(
+            n_estimators=100, 
+            random_state=42, 
+            class_weight='balanced'
+        )
+        self.model.fit(X_train_scaled, y_train)
+        
+        # Evaluate the model
+        y_pred = self.model.predict(X_test_scaled)
+        accuracy = accuracy_score(y_test, y_pred)
+        report = classification_report(y_test, y_pred, output_dict=True)
+        
+        return {
+            'accuracy': accuracy,
+            'classification_report': report
+        }
+    
+    def predict_credit_score(self, input_data):
+        """
+        Predict credit worthiness for given input data.
+        
+        :param input_data: Dictionary of feature values
+        :return: Prediction and probability
+        """
+        if self.model is None or self.scaler is None:
+            raise ValueError("Model not trained. Please train the model first.")
+        
+        # Convert input to DataFrame and ensure correct order of features
+        input_df = pd.DataFrame([input_data])[self.features]
+        
+        # Scale the input
+        input_scaled = self.scaler.transform(input_df)
+        
+        # Predict
+        prediction = self.model.predict(input_scaled)[0]
+        prediction_proba = self.model.predict_proba(input_scaled)[0]
+        
+        return {
+            'credit_worthiness': int(prediction),
+            'probability': float(prediction_proba[prediction])
+        }
+
+# Flask Application
+app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
+
+# Initialize the credit scoring model
+credit_model = CreditScoringModel()
+
+@app.route('/train', methods=['POST'])
+def train_model():
+    """Endpoint to train the credit scoring model."""
+    try:
+        results = credit_model.train_model()
+        return jsonify({
+            'status': 'success',
+            'results': results
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    """Endpoint to predict credit worthiness."""
+    try:
+        # Get input data from request
+        input_data = request.json
+        
+        # Validate input
+        required_features = credit_model.features
+        for feature in required_features:
+            if feature not in input_data:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Missing required feature: {feature}'
+                }), 400
+        
+        # Predict
+        prediction = credit_model.predict_credit_score(input_data)
+        
+        return jsonify({
+            'status': 'success',
+            'prediction': prediction
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/model-info', methods=['GET'])
+def get_model_info():
+    """Provide information about the model and its features."""
+    return jsonify({
+        'features': credit_model.features,
+        'feature_descriptions': {
+            'annual_income': 'Annual income in USD',
+            'credit_history_length': 'Length of credit history in years',
+            'num_credit_cards': 'Number of credit cards owned',
+            'total_debt': 'Total outstanding debt in USD',
+            'payment_consistency': 'Consistency of past payments (0-1)',
+            'age': 'Age of the individual'
+        }
+    }), 200
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
